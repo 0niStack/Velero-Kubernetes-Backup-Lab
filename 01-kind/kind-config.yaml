@@ -1,0 +1,12 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: velero-lab
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # host:8080 -> NodePort 30080 (nginx-svc)
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+  - role: worker
+  - role: worker
