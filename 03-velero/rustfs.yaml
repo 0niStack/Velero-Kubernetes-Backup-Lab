@@ -1,0 +1,107 @@
+# RustFS = S3-compatible backend for Velero (lab only, emptyDir storage)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs
+  namespace: velero
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rustfs
+  template:
+    metadata:
+      labels:
+        app: rustfs
+    spec:
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: rustfs
+          image: rustfs/rustfs:latest
+          args: ["/data"]
+          env:
+            - name: RUSTFS_VOLUMES
+              value: /data
+            - name: RUSTFS_ADDRESS
+              value: ":9000"
+            - name: RUSTFS_CONSOLE_ADDRESS
+              value: ":9001"
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: "true"
+            - name: RUSTFS_ACCESS_KEY
+              value: veleroadmin
+            - name: RUSTFS_SECRET_KEY
+              value: velero-secret-12345
+            - name: RUSTFS_OBS_LOG_DIRECTORY
+              value: /var/log/rustfs/
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /var/log/rustfs
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: velero
+spec:
+  selector:
+    app: rustfs
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rustfs-create-bucket
+  namespace: velero
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: aws-cli
+          image: amazon/aws-cli:latest
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: veleroadmin
+            - name: AWS_SECRET_ACCESS_KEY
+              value: velero-secret-12345
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              EP=http://rustfs:9000
+              until aws --endpoint-url $EP s3api head-bucket --bucket velero 2>/dev/null \
+                 || aws --endpoint-url $EP s3 mb s3://velero; do
+                echo "waiting for RustFS..."; sleep 3
+              done
+              echo "bucket ready"
