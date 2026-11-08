@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
-URL="${URL:-http://localhost:8080}"
+LOCAL_PORT="${LOCAL_PORT:-8081}"
 
-echo "== curl $URL =="
-if curl -fsS --max-time 5 "$URL" | grep -qi "Hello from nginx"; then
-  echo "OK: nginx is serving"
-else
-  echo "FAIL: nginx not reachable"; exit 1
-fi
+kubectl -n demo port-forward svc/nginx-svc "${LOCAL_PORT}:80" >/dev/null 2>&1 &
+PF_PID=$!
+trap 'kill $PF_PID 2>/dev/null || true' EXIT
+
+echo "== curl http://localhost:${LOCAL_PORT} (via port-forward) =="
+for i in $(seq 1 10); do
+  if curl -fsS --max-time 3 "http://localhost:${LOCAL_PORT}" | grep -qi "Hello from nginx"; then
+    echo "OK: nginx is serving"
+    exit 0
+  fi
+  sleep 1
+done
+echo "FAIL: nginx not reachable"
+exit 1
